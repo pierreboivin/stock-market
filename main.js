@@ -22,9 +22,80 @@ __export(main_exports, {
   default: () => StockMarketPlugin
 });
 module.exports = __toCommonJS(main_exports);
+var import_obsidian3 = require("obsidian");
+
+// src/settings.ts
 var import_obsidian = require("obsidian");
-var TRANSACTIONS_FOLDER = "090 - Finance/Stocks/Transactions";
-var SYMBOLS_PATH = "090 - Finance/Stocks/symbols.json";
+var DEFAULT_SETTINGS = {
+  transactionsFolder: "090 - Finance/Stocks/Transactions",
+  symbolsPath: "090 - Finance/Stocks/symbols.json"
+};
+var StockMarketSettingTab = class extends import_obsidian.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    new import_obsidian.Setting(containerEl).setName("Dossier des transactions").setDesc("Chemin relatif au vault (ex. : 090 - Finance/Stocks/Transactions)").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.transactionsFolder).setValue(this.plugin.settings.transactionsFolder).onChange(async (value) => {
+      this.plugin.settings.transactionsFolder = value.trim();
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian.Setting(containerEl).setName("Fichier des symboles").setDesc("Chemin relatif au vault vers le fichier JSON des cours (ex. : 090 - Finance/Stocks/symbols.json)").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.symbolsPath).setValue(this.plugin.settings.symbolsPath).onChange(async (value) => {
+      this.plugin.settings.symbolsPath = value.trim();
+      await this.plugin.saveSettings();
+    }));
+  }
+};
+
+// src/data.ts
+var import_obsidian2 = require("obsidian");
+async function loadSymbols(app, settings) {
+  const { symbolsPath } = settings;
+  const file = app.vault.getAbstractFileByPath(symbolsPath);
+  if (!(file instanceof import_obsidian2.TFile))
+    throw new Error(`Fichier introuvable : ${symbolsPath}`);
+  const data = JSON.parse(await app.vault.read(file));
+  return data.symbols;
+}
+async function loadTransactions(app, settings) {
+  const { transactionsFolder } = settings;
+  const files = app.vault.getMarkdownFiles().filter(
+    (f) => f.path.startsWith(transactionsFolder + "/")
+  );
+  const results = await Promise.all(files.map(async (file) => {
+    const content = await app.vault.read(file);
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match)
+      return null;
+    try {
+      const data = (0, import_obsidian2.parseYaml)(match[1]);
+      return (data == null ? void 0 : data.ticker) && (data == null ? void 0 : data.action) ? data : null;
+    } catch (e) {
+      return null;
+    }
+  }));
+  return results.filter((t) => t !== null);
+}
+
+// src/format.ts
+function fmtPrice(amount, currency) {
+  return `${amount.toFixed(2)} ${currency}`;
+}
+function fmtGain(amount, currency) {
+  const sign = amount >= 0 ? "+" : "";
+  return `${sign}${amount.toFixed(2)} ${currency}`;
+}
+function fmtPct(pct) {
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(2)} %`;
+}
+function gainClass(amount) {
+  return amount >= 0 ? "sm-positive" : "sm-negative";
+}
+
+// src/positions.ts
 function buildSymbolMap(symbols) {
   return new Map(symbols.map((s) => [s.symbol, s]));
 }
@@ -74,20 +145,8 @@ function computePositions(transactions) {
   }
   return Array.from(posMap.values());
 }
-function fmtPrice(amount, currency) {
-  return `${amount.toFixed(2)} ${currency}`;
-}
-function fmtGain(amount, currency) {
-  const sign = amount >= 0 ? "+" : "";
-  return `${sign}${amount.toFixed(2)} ${currency}`;
-}
-function fmtPct(pct) {
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(2)} %`;
-}
-function gainClass(amount) {
-  return amount >= 0 ? "sm-positive" : "sm-negative";
-}
+
+// src/ui.ts
 function buildDetailTable(container, pos, symbol) {
   const table = container.createEl("table", { cls: "sm-detail-table" });
   const hr = table.createEl("thead").createEl("tr");
@@ -117,10 +176,79 @@ function buildDetailTable(container, pos, symbol) {
     }
   }
 }
-var StockMarketPlugin = class extends import_obsidian.Plugin {
+async function renderPositions(el, app, settings) {
+  try {
+    const symbols = await loadSymbols(app, settings);
+    const symbolMap = buildSymbolMap(symbols);
+    const transactions = await loadTransactions(app, settings);
+    const positions = computePositions(transactions);
+    const open = positions.filter((p) => p.openQty > 0).sort((a, b) => a.ticker.localeCompare(b.ticker));
+    const closed = positions.filter((p) => p.openQty === 0 && p.totalSoldQty > 0).sort((a, b) => a.ticker.localeCompare(b.ticker));
+    const wrapper = el.createDiv({ cls: "sm-wrapper" });
+    if (open.length > 0) {
+      wrapper.createEl("h4", { text: "Positions ouvertes", cls: "sm-section-title" });
+      const grid = wrapper.createDiv({ cls: "sm-grid" });
+      const header = grid.createDiv({ cls: "sm-header sm-cols-open" });
+      ["Ticker", "Qt\xE9", "Prix moy.", "Prix actuel", "Gain latent $", "Gain latent %"].forEach(
+        (h) => header.createEl("span", { text: h })
+      );
+      for (const pos of open) {
+        const symbol = resolveSymbol(pos.ticker, pos.currency, symbolMap);
+        const details = grid.createEl("details", { cls: "sm-position" });
+        const summary = details.createEl("summary", { cls: "sm-cols-open" });
+        summary.createEl("span", { text: pos.ticker, cls: "sm-ticker" });
+        summary.createEl("span", { text: String(pos.openQty) });
+        summary.createEl("span", { text: fmtPrice(pos.pmp, pos.currency) });
+        if (!symbol) {
+          ["\u2014", "\u2014", "\u2014"].forEach((v) => summary.createEl("span", { text: v }));
+        } else {
+          summary.createEl("span", { text: fmtPrice(symbol.price, symbol.currency) });
+          const gainAmt = (symbol.price - pos.pmp) * pos.openQty;
+          const gainPct = (symbol.price - pos.pmp) / pos.pmp * 100;
+          summary.createEl("span", { text: fmtGain(gainAmt, symbol.currency), cls: gainClass(gainAmt) });
+          summary.createEl("span", { text: fmtPct(gainPct), cls: gainClass(gainPct) });
+        }
+        buildDetailTable(details.createDiv({ cls: "sm-detail" }), pos, symbol);
+      }
+    }
+    if (closed.length > 0) {
+      wrapper.createEl("h4", { text: "Positions ferm\xE9es", cls: "sm-section-title" });
+      const grid = wrapper.createDiv({ cls: "sm-grid" });
+      const header = grid.createDiv({ cls: "sm-header sm-cols-closed" });
+      ["Ticker", "Qt\xE9 vendue", "Prix moy.", "Gain r\xE9alis\xE9 $", "Gain r\xE9alis\xE9 %"].forEach(
+        (h) => header.createEl("span", { text: h })
+      );
+      for (const pos of closed) {
+        const details = grid.createEl("details", { cls: "sm-position" });
+        const summary = details.createEl("summary", { cls: "sm-cols-closed" });
+        summary.createEl("span", { text: pos.ticker, cls: "sm-ticker" });
+        summary.createEl("span", { text: String(pos.totalSoldQty) });
+        summary.createEl("span", { text: fmtPrice(pos.pmp, pos.currency) });
+        const gainPct = pos.pmp > 0 ? pos.realizedGain / (pos.pmp * pos.totalSoldQty) * 100 : 0;
+        summary.createEl("span", { text: fmtGain(pos.realizedGain, pos.currency), cls: gainClass(pos.realizedGain) });
+        summary.createEl("span", { text: fmtPct(gainPct), cls: gainClass(gainPct) });
+        buildDetailTable(details.createDiv({ cls: "sm-detail" }), pos, void 0);
+      }
+    }
+    if (symbols.length > 0) {
+      wrapper.createEl("p", { text: `Prix mis \xE0 jour : ${symbols[0].updated_at}`, cls: "sm-updated" });
+    }
+  } catch (e) {
+    el.createEl("p", { text: `Erreur : ${e.message}`, cls: "sm-error" });
+  }
+}
+
+// main.ts
+var StockMarketPlugin = class extends import_obsidian3.Plugin {
+  constructor() {
+    super(...arguments);
+    this.settings = DEFAULT_SETTINGS;
+  }
   async onload() {
-    this.registerMarkdownCodeBlockProcessor("stock-gains", async (source, el) => {
-      await this.renderPositions(el);
+    await this.loadSettings();
+    this.addSettingTab(new StockMarketSettingTab(this.app, this));
+    this.registerMarkdownCodeBlockProcessor("stock-gains", async (_source, el) => {
+      await renderPositions(el, this.app, this.settings);
     });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -128,7 +256,7 @@ var StockMarketPlugin = class extends import_obsidian.Plugin {
         if (!leaf)
           return;
         const view = leaf.view;
-        if (!(view instanceof import_obsidian.MarkdownView))
+        if (!(view instanceof import_obsidian3.MarkdownView))
           return;
         const file = view.file;
         if (!file)
@@ -142,90 +270,10 @@ var StockMarketPlugin = class extends import_obsidian.Plugin {
       })
     );
   }
-  async renderPositions(el) {
-    try {
-      const symbols = await this.loadSymbols();
-      const symbolMap = buildSymbolMap(symbols);
-      const transactions = await this.loadTransactions();
-      const positions = computePositions(transactions);
-      const open = positions.filter((p) => p.openQty > 0).sort((a, b) => a.ticker.localeCompare(b.ticker));
-      const closed = positions.filter((p) => p.openQty === 0 && p.totalSoldQty > 0).sort((a, b) => a.ticker.localeCompare(b.ticker));
-      const wrapper = el.createDiv({ cls: "sm-wrapper" });
-      if (open.length > 0) {
-        wrapper.createEl("h4", { text: "Positions ouvertes", cls: "sm-section-title" });
-        const grid = wrapper.createDiv({ cls: "sm-grid" });
-        const header = grid.createDiv({ cls: "sm-header sm-cols-open" });
-        ["Ticker", "Qt\xE9", "Prix moy.", "Prix actuel", "Gain latent $", "Gain latent %"].forEach(
-          (h) => header.createEl("span", { text: h })
-        );
-        for (const pos of open) {
-          const symbol = resolveSymbol(pos.ticker, pos.currency, symbolMap);
-          const details = grid.createEl("details", { cls: "sm-position" });
-          const summary = details.createEl("summary", { cls: "sm-cols-open" });
-          summary.createEl("span", { text: pos.ticker, cls: "sm-ticker" });
-          summary.createEl("span", { text: String(pos.openQty) });
-          summary.createEl("span", { text: fmtPrice(pos.pmp, pos.currency) });
-          if (!symbol) {
-            ["\u2014", "\u2014", "\u2014"].forEach((v) => summary.createEl("span", { text: v }));
-          } else {
-            summary.createEl("span", { text: fmtPrice(symbol.price, symbol.currency) });
-            const gainAmt = (symbol.price - pos.pmp) * pos.openQty;
-            const gainPct = (symbol.price - pos.pmp) / pos.pmp * 100;
-            summary.createEl("span", { text: fmtGain(gainAmt, symbol.currency), cls: gainClass(gainAmt) });
-            summary.createEl("span", { text: fmtPct(gainPct), cls: gainClass(gainPct) });
-          }
-          buildDetailTable(details.createDiv({ cls: "sm-detail" }), pos, symbol);
-        }
-      }
-      if (closed.length > 0) {
-        wrapper.createEl("h4", { text: "Positions ferm\xE9es", cls: "sm-section-title" });
-        const grid = wrapper.createDiv({ cls: "sm-grid" });
-        const header = grid.createDiv({ cls: "sm-header sm-cols-closed" });
-        ["Ticker", "Qt\xE9 vendue", "Prix moy.", "Gain r\xE9alis\xE9 $", "Gain r\xE9alis\xE9 %"].forEach(
-          (h) => header.createEl("span", { text: h })
-        );
-        for (const pos of closed) {
-          const details = grid.createEl("details", { cls: "sm-position" });
-          const summary = details.createEl("summary", { cls: "sm-cols-closed" });
-          summary.createEl("span", { text: pos.ticker, cls: "sm-ticker" });
-          summary.createEl("span", { text: String(pos.totalSoldQty) });
-          summary.createEl("span", { text: fmtPrice(pos.pmp, pos.currency) });
-          const gainPct = pos.pmp > 0 ? pos.realizedGain / (pos.pmp * pos.totalSoldQty) * 100 : 0;
-          summary.createEl("span", { text: fmtGain(pos.realizedGain, pos.currency), cls: gainClass(pos.realizedGain) });
-          summary.createEl("span", { text: fmtPct(gainPct), cls: gainClass(gainPct) });
-          buildDetailTable(details.createDiv({ cls: "sm-detail" }), pos, void 0);
-        }
-      }
-      if (symbols.length > 0) {
-        wrapper.createEl("p", { text: `Prix mis \xE0 jour : ${symbols[0].updated_at}`, cls: "sm-updated" });
-      }
-    } catch (e) {
-      el.createEl("p", { text: `Erreur : ${e.message}`, cls: "sm-error" });
-    }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
-  async loadSymbols() {
-    const file = this.app.vault.getAbstractFileByPath(SYMBOLS_PATH);
-    if (!(file instanceof import_obsidian.TFile))
-      throw new Error(`Fichier introuvable : ${SYMBOLS_PATH}`);
-    const data = JSON.parse(await this.app.vault.read(file));
-    return data.symbols;
-  }
-  async loadTransactions() {
-    const files = this.app.vault.getMarkdownFiles().filter(
-      (f) => f.path.startsWith(TRANSACTIONS_FOLDER + "/")
-    );
-    const results = await Promise.all(files.map(async (file) => {
-      const content = await this.app.vault.read(file);
-      const match = content.match(/^---\n([\s\S]*?)\n---/);
-      if (!match)
-        return null;
-      try {
-        const data = (0, import_obsidian.parseYaml)(match[1]);
-        return (data == null ? void 0 : data.ticker) && (data == null ? void 0 : data.action) ? data : null;
-      } catch (e) {
-        return null;
-      }
-    }));
-    return results.filter((t) => t !== null);
+  async saveSettings() {
+    await this.saveData(this.settings);
   }
 };
