@@ -1,0 +1,10 @@
+{
+  "id": "stock-market",
+  "name": "Stock Market",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Affiche un tableau de gains/pertes pour chaque transaction boursière.",
+  "author": "Pierre",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

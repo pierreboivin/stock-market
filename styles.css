@@ -1,0 +1,234 @@
+/* ── Largeur pleine page ──────────────────────────────────── */
+.stock-transactions.markdown-preview-view {
+  --file-line-width: 100%;
+  --line-width: 100%;
+  --max-width: 100%;
+}
+
+.stock-transactions.markdown-preview-view .markdown-preview-sizer {
+  max-width: 100% !important;
+  width: 100% !important;
+  padding-left: 32px !important;
+  padding-right: 32px !important;
+}
+
+.stock-transactions .cm-sizer,
+.stock-transactions .cm-contentContainer {
+  max-width: 100% !important;
+}
+
+/* ── Cacher les propriétés et le titre ───────────────────── */
+.stock-transactions .inline-title {
+  display: none;
+}
+
+.stock-transactions.is-readable-line-width .metadata-container,
+.stock-transactions .markdown-reading-view .metadata-container {
+  display: none;
+}
+
+/* ── Wrapper ──────────────────────────────────────────────── */
+.sm-wrapper {
+  margin: 0.5rem 0;
+}
+
+/* ── Sections ────────────────────────────────────────────── */
+.sm-section-title {
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 1.4em 0 0 0;
+  border: none;
+}
+
+/* ── Grille ───────────────────────────────────────────────── */
+.sm-grid {
+  width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 0.4em;
+}
+
+/* Colonnes : positions ouvertes (6 colonnes) */
+.sm-cols-open {
+  display: grid;
+  grid-template-columns: 1.5fr 0.7fr 1.4fr 1.4fr 1.8fr 1.2fr;
+  gap: 0 8px;
+  align-items: center;
+}
+
+/* Colonnes : positions fermées (5 colonnes) */
+.sm-cols-closed {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1.4fr 1.8fr 1.2fr;
+  gap: 0 8px;
+  align-items: center;
+}
+
+/* ── En-tête ──────────────────────────────────────────────── */
+.sm-header {
+  padding: 8px 14px;
+  background: var(--background-secondary);
+  border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.sm-header span {
+  font-size: 0.76em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+}
+
+/* ── Position (tiroir) ────────────────────────────────────── */
+.sm-position {
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+}
+
+.sm-position:last-child {
+  border-bottom: none;
+}
+
+.sm-position > summary {
+  padding: 8px 14px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.88em;
+  font-family: var(--font-monospace);
+  user-select: none;
+}
+
+.sm-position > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sm-position > summary:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Triangle d'expansion sur le ticker */
+.sm-ticker::before {
+  content: "▶";
+  display: inline-block;
+  font-size: 0.6em;
+  opacity: 0.4;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+  vertical-align: middle;
+}
+
+.sm-position[open] > summary .sm-ticker::before {
+  transform: rotate(90deg);
+}
+
+/* Rangées alternées */
+.sm-position:nth-child(even) > summary {
+  background: var(--background-secondary-alt);
+}
+
+.sm-position:nth-child(even) > summary:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* ── Détail (sous-tableau) ────────────────────────────────── */
+.sm-detail {
+  padding: 10px 14px 12px 36px;
+  background: var(--background-primary-alt, var(--background-secondary));
+  border-top: 1px solid var(--background-modifier-border-hover);
+}
+
+.sm-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82em;
+  font-family: var(--font-monospace);
+}
+
+.sm-detail-table th {
+  padding: 5px 10px;
+  text-align: left;
+  font-weight: 600;
+  font-family: var(--font-interface);
+  font-size: 0.76em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+}
+
+.sm-detail-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+  white-space: nowrap;
+}
+
+.sm-detail-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Aligner les colonnes numériques à droite dans le détail */
+.sm-detail-table th:nth-child(n+3),
+.sm-detail-table td:nth-child(n+3) {
+  text-align: right;
+}
+
+/* ── Action ───────────────────────────────────────────────── */
+.sm-buy {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+.sm-sell {
+  color: var(--color-red);
+  font-weight: 600;
+}
+
+/* ── Gain / Perte ─────────────────────────────────────────── */
+.sm-positive {
+  color: var(--color-green);
+  font-weight: 700;
+}
+
+.sm-negative {
+  color: var(--color-red);
+  font-weight: 700;
+}
+
+/* Aligner les colonnes de gain à droite dans le résumé */
+.sm-cols-open span:nth-child(n+5),
+.sm-cols-closed span:nth-child(n+4) {
+  text-align: right;
+}
+
+/* ── Indicateur de note ───────────────────────────────────── */
+.sm-note-indicator {
+  cursor: help;
+  opacity: 0.35;
+  font-size: 0.8em;
+  margin-left: 5px;
+  vertical-align: middle;
+  transition: opacity 0.15s;
+}
+
+.sm-note-indicator:hover {
+  opacity: 1;
+}
+
+/* ── Horodatage ───────────────────────────────────────────── */
+.sm-updated {
+  font-size: 0.72em;
+  color: var(--text-faint);
+  margin-top: 10px;
+  font-family: var(--font-interface);
+}
+
+/* ── Erreur ───────────────────────────────────────────────── */
+.sm-error {
+  color: var(--color-red);
+  font-family: var(--font-interface);
+}
