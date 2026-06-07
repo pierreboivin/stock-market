@@ -2,13 +2,8 @@
 
 ## En cours / Priorité haute
 
-### Ajout de transaction via interface
-- [ ] Bouton « + Transaction » dans le tableau
-- [ ] Modal Obsidian avec formulaire : date, ticker, action, quantité, prix unitaire, devise, note
-- [ ] Validation des champs avant écriture
-- [ ] Création automatique du fichier `.md` dans `090 - Finance/Stocks/Transactions/` avec le bon frontmatter et le bon nom de fichier (`YYYY-MM-DD TICKER action.md`)
-
 ### Ajout de transaction via capture Disnat
+
 - [ ] Bouton « Importer depuis Disnat »
 - [ ] Modal pour coller / glisser-déposer une capture d'écran du relevé Disnat
 - [ ] Extraction OCR des champs (date, ticker, qté, prix, montant, devise) via API vision (Claude ?)

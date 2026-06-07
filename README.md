@@ -85,6 +85,31 @@ Cela active :
 - **Largeur pleine page** — le tableau utilise tout l'espace disponible
 - **Mode lecture automatique** — la note s'ouvre toujours en consultation (jamais en édition)
 - **Propriétés masquées** — le frontmatter n'est pas affiché
+- **Bouton d'ajout de transaction** dans la barre native Obsidian (icône `+`)
+
+---
+
+## Ajouter une transaction
+
+Sur toute note avec `cssclasses: stock-transactions`, un bouton `⊕` apparaît dans la barre d'outils native d'Obsidian. Le cliquer ouvre un formulaire avec les champs :
+
+| Champ | Détails |
+|---|---|
+| Date | Pré-rempli avec la date du jour (format `YYYY-MM-DD`) |
+| Ticker | Accepte les formats `VFV.TO`, `NVDA`, `TSE:VGRO` |
+| Action | Achat / Vente |
+| Devise | CAD ou USD |
+| Quantité | Nombre d'unités |
+| Prix unitaire | Prix par unité |
+| Total | Calculé automatiquement — modifiable si des frais s'appliquent |
+| Note | Optionnel — affiché en tooltip `ⓘ` dans le tableau |
+
+**À la soumission (bouton ou touche `Entrée`) :**
+1. Crée un fichier `.md` dans le dossier Transactions (`YYYY-MM-DD TICKER action.md`)
+2. Ajoute le ticker à `symbols.json` s'il n'y est pas encore (avec `price: 0` — à mettre à jour manuellement)
+3. Rafraîchit le tableau de positions sans recharger la page
+
+**Normalisation du ticker pour `symbols.json` :** `TSE:VGRO` → `VGRO.TO`
 
 ---
 

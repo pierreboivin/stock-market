@@ -5,6 +5,10 @@ import { buildSymbolMap, computePositions, resolveSymbol } from "./positions";
 import { StockMarketSettings } from "./settings";
 import { Position, SymbolInfo } from "./types";
 
+function isPriced(symbol: SymbolInfo | undefined): symbol is SymbolInfo {
+	return !!symbol && symbol.price > 0 && symbol.updated_at !== "";
+}
+
 function buildDetailTable(container: HTMLElement, pos: Position, symbol: SymbolInfo | undefined): void {
 	const table = container.createEl("table", { cls: "sm-detail-table" });
 	const hr = table.createEl("thead").createEl("tr");
@@ -75,7 +79,7 @@ export async function renderPositions(el: HTMLElement, app: App, settings: Stock
 				summary.createEl("span", { text: String(pos.openQty) });
 				summary.createEl("span", { text: fmtPrice(pos.pmp, pos.currency) });
 
-				if (!symbol) {
+				if (!isPriced(symbol)) {
 					["—", "—", "—"].forEach(v => summary.createEl("span", { text: v }));
 				} else {
 					summary.createEl("span", { text: fmtPrice(symbol.price, symbol.currency) });
@@ -85,7 +89,7 @@ export async function renderPositions(el: HTMLElement, app: App, settings: Stock
 					summary.createEl("span", { text: fmtPct(gainPct), cls: gainClass(gainPct) });
 				}
 
-				buildDetailTable(details.createDiv({ cls: "sm-detail" }), pos, symbol);
+				buildDetailTable(details.createDiv({ cls: "sm-detail" }), pos, isPriced(symbol) ? symbol : undefined);
 			}
 		}
 
