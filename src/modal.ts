@@ -1,7 +1,19 @@
-import { App, Modal, Notice, Setting, TextComponent } from "obsidian";
+import { App, Modal, Notice, requestUrl, Setting, TextComponent } from "obsidian";
 import { createTransaction, addSymbolIfMissing } from "./data";
+import { fmtPrice } from "./format";
 import { StockMarketSettings } from "./settings";
 import { Transaction } from "./types";
+
+async function validateTickerYahoo(ticker: string): Promise<boolean> {
+	try {
+		const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&quotesCount=1&newsCount=0&enableFuzzyQuery=false`;
+		const resp = await requestUrl({ url });
+		const quotes: Array<{ symbol: string }> = resp.json?.quotes ?? [];
+		return quotes.length > 0;
+	} catch {
+		return false;
+	}
+}
 
 export class AddTransactionModal extends Modal {
 	private settings: StockMarketSettings;
@@ -25,13 +37,12 @@ export class AddTransactionModal extends Modal {
 		};
 
 		let totalComponent: TextComponent | null = null;
-		let totalManual = false;
 
 		const syncTotal = () => {
-			if (totalManual || !totalComponent) return;
+			if (!totalComponent) return;
 			const val = Math.round((tx.quantity ?? 0) * (tx.unit_price ?? 0) * 100) / 100;
 			tx.total = val;
-			totalComponent.setValue(val > 0 ? String(val) : "");
+			totalComponent.setValue(val > 0 ? fmtPrice(val, tx.currency ?? "CAD") : "");
 		};
 
 		new Setting(contentEl)
@@ -43,9 +54,21 @@ export class AddTransactionModal extends Modal {
 		new Setting(contentEl)
 			.setName("Ticker")
 			.setDesc("Ex : VFV.TO · NVDA · TSE:VGRO")
-			.addText(text => text
-				.setPlaceholder("VFV.TO")
-				.onChange(v => tx.ticker = v.trim().toUpperCase()));
+			.addText(text => {
+				text.setPlaceholder("VFV.TO").onChange(v => {
+					tx.ticker = v.trim().toUpperCase();
+					text.inputEl.removeClass("sm-ticker-valid", "sm-ticker-invalid");
+				});
+
+				text.inputEl.addEventListener("blur", async () => {
+					const ticker = tx.ticker;
+					if (!ticker) return;
+					const valid = await validateTickerYahoo(ticker);
+					if (tx.ticker !== ticker) return;
+					text.inputEl.removeClass("sm-ticker-valid", "sm-ticker-invalid");
+					text.inputEl.addClass(valid ? "sm-ticker-valid" : "sm-ticker-invalid");
+				});
+			});
 
 		new Setting(contentEl)
 			.setName("Action")
@@ -77,13 +100,12 @@ export class AddTransactionModal extends Modal {
 
 		new Setting(contentEl)
 			.setName("Total")
-			.setDesc("Calculé automatiquement — modifiable si des frais s'appliquent")
+			.setDesc("Calculé automatiquement (quantité × prix unitaire)")
 			.addText(text => {
 				totalComponent = text;
-				text.setPlaceholder("0.00").onChange(v => {
-					totalManual = true;
-					tx.total = parseFloat(v) || 0;
-				});
+				text.setPlaceholder("0.00");
+				text.inputEl.disabled = true;
+				text.inputEl.addClass("sm-total-readonly");
 			});
 
 		new Setting(contentEl)

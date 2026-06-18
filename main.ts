@@ -1,23 +1,46 @@
 import { MarkdownView, Plugin, WorkspaceLeaf } from "obsidian";
 import { AddTransactionModal } from "./src/modal";
 import { DEFAULT_SETTINGS, StockMarketSettingTab, StockMarketSettings } from "./src/settings";
-import { renderPositions } from "./src/ui";
+import { renderAllocationChart, renderPerformanceChart } from "./src/chart";
+import { renderClosedPositions, renderOpenPositions, renderPositions } from "./src/ui";
 
 export default class StockMarketPlugin extends Plugin {
 	settings: StockMarketSettings = DEFAULT_SETTINGS;
 	private actionEl: HTMLElement | null = null;
-	private refreshPositions: (() => Promise<void>) | null = null;
+	private refreshCallbacks: Map<string, () => Promise<void>> = new Map();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new StockMarketSettingTab(this.app, this));
 
 		this.registerMarkdownCodeBlockProcessor("stock-gains", async (_source, el) => {
-			this.refreshPositions = async () => {
-				el.empty();
-				await renderPositions(el, this.app, this.settings);
-			};
+			const cb = async () => { el.empty(); await renderPositions(el, this.app, this.settings); };
+			this.refreshCallbacks.set("stock-gains", cb);
 			await renderPositions(el, this.app, this.settings);
+		});
+
+		this.registerMarkdownCodeBlockProcessor("stock-gains-open", async (_source, el) => {
+			const cb = async () => { el.empty(); await renderOpenPositions(el, this.app, this.settings); };
+			this.refreshCallbacks.set("stock-gains-open", cb);
+			await renderOpenPositions(el, this.app, this.settings);
+		});
+
+		this.registerMarkdownCodeBlockProcessor("stock-gains-closed", async (_source, el) => {
+			const cb = async () => { el.empty(); await renderClosedPositions(el, this.app, this.settings); };
+			this.refreshCallbacks.set("stock-gains-closed", cb);
+			await renderClosedPositions(el, this.app, this.settings);
+		});
+
+		this.registerMarkdownCodeBlockProcessor("stock-chart-allocation", async (_source, el) => {
+			const cb = async () => { el.empty(); await renderAllocationChart(el, this.app, this.settings); };
+			this.refreshCallbacks.set("stock-chart-allocation", cb);
+			await renderAllocationChart(el, this.app, this.settings);
+		});
+
+		this.registerMarkdownCodeBlockProcessor("stock-chart-performance", async (_source, el) => {
+			const cb = async () => { el.empty(); await renderPerformanceChart(el, this.app, this.settings); };
+			this.refreshCallbacks.set("stock-chart-performance", cb);
+			await renderPerformanceChart(el, this.app, this.settings);
 		});
 
 		this.app.workspace.onLayoutReady(() => this.updateAddAction());
@@ -53,7 +76,9 @@ export default class StockMarketPlugin extends Plugin {
 
 		this.actionEl = markdownView.addAction("circle-plus", "Ajouter une transaction", () => {
 			new AddTransactionModal(this.app, this.settings, async () => {
-				await this.refreshPositions?.();
+				for (const cb of this.refreshCallbacks.values()) {
+					await cb();
+				}
 			}).open();
 		});
 	}

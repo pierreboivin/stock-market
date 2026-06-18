@@ -52,10 +52,10 @@
   margin-top: 0.4em;
 }
 
-/* Colonnes : positions ouvertes (6 colonnes) */
+/* Colonnes : positions ouvertes (7 colonnes) */
 .sm-cols-open {
   display: grid;
-  grid-template-columns: 1.5fr 0.7fr 1.4fr 1.4fr 1.8fr 1.2fr;
+  grid-template-columns: 1.5fr 0.7fr 1.4fr 1.4fr 1.4fr 1.8fr 1.2fr;
   gap: 0 8px;
   align-items: center;
 }
@@ -227,8 +227,161 @@
   font-family: var(--font-interface);
 }
 
+/* ── Validation ticker Yahoo Finance ────────────────────── */
+.sm-ticker-valid {
+  background-color: rgba(74, 222, 128, 0.12) !important;
+  border-color: var(--color-green) !important;
+}
+
+.sm-ticker-invalid {
+  background-color: rgba(248, 113, 113, 0.12) !important;
+  border-color: var(--color-red) !important;
+}
+
+/* ── Champ total (lecture seule) ─────────────────────────── */
+.sm-total-readonly {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--background-modifier-border) !important;
+}
+
 /* ── Erreur ───────────────────────────────────────────────── */
 .sm-error {
   color: var(--color-red);
   font-family: var(--font-interface);
+}
+
+/* ── Graphiques — commun ──────────────────────────────────── */
+.sm-chart-wrapper {
+  margin: 0.5rem 0;
+}
+
+.sm-chart-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.88em;
+  font-family: var(--font-interface);
+}
+
+/* ── Donut — répartition du portefeuille ─────────────────── */
+.sm-chart-donut-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.sm-chart-donut-wrapper svg {
+  flex-shrink: 0;
+}
+
+.sm-chart-legend {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sm-chart-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85em;
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+
+.sm-chart-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.sm-chart-legend-ticker {
+  font-weight: 600;
+  color: var(--text-normal);
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.sm-chart-legend-pct {
+  color: var(--text-muted);
+  width: 56px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.sm-chart-legend-value {
+  color: var(--text-faint);
+  margin-left: 24px;
+}
+
+/* ── Barres — performance par ticker ─────────────────────── */
+.sm-chart-bars-wrapper {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  column-gap: 10px;
+  row-gap: 5px;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 0.85em;
+  font-family: var(--font-monospace);
+}
+
+.sm-chart-bar-row {
+  display: contents;
+}
+
+.sm-chart-bar-label {
+  font-weight: 600;
+  text-align: right;
+  color: var(--text-normal);
+  white-space: nowrap;
+}
+
+.sm-chart-bar-track {
+  position: relative;
+  height: 18px;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+  overflow: clip;
+}
+
+.sm-chart-bar-track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--background-modifier-border-focus, var(--text-faint));
+}
+
+.sm-chart-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+}
+
+.sm-chart-bar.sm-positive {
+  background: var(--color-green);
+}
+
+.sm-chart-bar.sm-negative {
+  background: var(--color-red);
+}
+
+.sm-chart-bar-values {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.sm-chart-bar-amount {
+  color: var(--text-faint);
+  font-size: 0.88em;
 }
