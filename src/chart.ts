@@ -1,6 +1,7 @@
 import { App } from "obsidian";
 import { loadSymbols, loadTransactions } from "./data";
 import { fmtGain, fmtPct, gainClass } from "./format";
+import { computePortfolioHistory, HISTORY_RANGES, HistoryRange, PortfolioPoint } from "./history";
 import { buildSymbolMap, computePositions, resolveSymbol } from "./positions";
 import { StockMarketSettings } from "./settings";
 import { SymbolInfo } from "./types";
@@ -189,4 +190,236 @@ export async function renderPerformanceChart(el: HTMLElement, app: App, settings
 	} catch (e) {
 		el.createEl("p", { text: `Erreur : ${(e as Error).message}`, cls: "sm-error" });
 	}
+}
+
+const HISTORY_CHART_W = 640;
+const HISTORY_CHART_H = 220;
+const HISTORY_PAD_TOP = 16;
+const HISTORY_PAD_BOTTOM = 12;
+const HISTORY_PAD_X = 8;
+
+/** Pas « rond » (1, 2, 5 × 10^n) juste au-dessus de `raw`. */
+function niceStep(raw: number): number {
+	const exp = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+	const frac = raw / exp;
+	if (frac <= 1) return exp;
+	if (frac <= 2) return 2 * exp;
+	if (frac <= 5) return 5 * exp;
+	return 10 * exp;
+}
+
+/** Valeurs rondes comprises dans [min, max], ~4 graduations. */
+function niceTicks(min: number, max: number): number[] {
+	const spread = max - min;
+	if (spread <= 0) return [min];
+	const step = niceStep(spread / 4);
+	const ticks: number[] = [];
+	for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-6; v += step) {
+		ticks.push(v);
+	}
+	return ticks;
+}
+
+function formatAxisValue(v: number, step: number): string {
+	const decimals = step >= 10 ? 0 : step >= 1 ? 1 : 2;
+	return v.toLocaleString("fr-CA", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+const MONTH_LETTERS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+
+function parseDay(dateStr: string): Date {
+	return new Date(`${dateStr}T00:00:00`);
+}
+
+/** Identifiant du lundi de la semaine — robuste aux lundis fériés (pas de séance). */
+function weekKey(d: Date): string {
+	const monday = new Date(d);
+	monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+	return monday.toDateString();
+}
+
+/**
+ * Indices où commence une nouvelle semaine (1 mois) ou un nouveau mois (1 an).
+ * Le 7 jours n'est pas découpé : une seule semaine à l'écran.
+ */
+function segmentStarts(points: PortfolioPoint[], range: HistoryRange): number[] {
+	if (range === "7d") return [];
+	const starts: number[] = [];
+	for (let i = 1; i < points.length; i++) {
+		const cur = parseDay(points[i].date);
+		const prev = parseDay(points[i - 1].date);
+		const changed = range === "1y"
+			? cur.getMonth() !== prev.getMonth()
+			: weekKey(cur) !== weekKey(prev);
+		if (changed) starts.push(i);
+	}
+	return starts;
+}
+
+function formatHistoryDate(dateStr: string, range: HistoryRange): string {
+	const d = new Date(`${dateStr}T00:00:00`);
+	if (range === "1y") return d.toLocaleDateString("fr-CA", { month: "short", year: "2-digit" });
+	return d.toLocaleDateString("fr-CA", { day: "2-digit", month: "short" });
+}
+
+function drawPortfolioLine(container: HTMLElement, points: PortfolioPoint[], range: HistoryRange): void {
+	const values = points.map(p => p.valueCad);
+	const min = Math.min(...values);
+	const max = Math.max(...values);
+	const spread = max - min || 1;
+
+	const plotW = HISTORY_CHART_W - HISTORY_PAD_X * 2;
+	const plotH = HISTORY_CHART_H - HISTORY_PAD_TOP - HISTORY_PAD_BOTTOM;
+
+	const xAt = (i: number) => HISTORY_PAD_X + (points.length > 1 ? (i / (points.length - 1)) * plotW : plotW / 2);
+	const yAt = (v: number) => HISTORY_PAD_TOP + plotH - ((v - min) / spread) * plotH;
+
+	const first = values[0];
+	const last = values[values.length - 1];
+	const changeAmt = last - first;
+	const changePct = first > 0 ? (changeAmt / first) * 100 : 0;
+	const cls = gainClass(changeAmt);
+
+	const summary = container.createDiv({ cls: "sm-history-summary" });
+	summary.createEl("span", {
+		text: `${last.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`,
+		cls: "sm-history-value",
+	});
+	summary.createEl("span", { text: `${fmtGain(changeAmt, "CAD")} (${fmtPct(changePct)})`, cls });
+
+	const svg = svgEl("svg", {
+		viewBox: `0 0 ${HISTORY_CHART_W} ${HISTORY_CHART_H}`,
+		preserveAspectRatio: "none",
+		class: "sm-history-svg",
+	});
+
+	const linePoints = points.map((p, i) => `${xAt(i).toFixed(2)},${yAt(p.valueCad).toFixed(2)}`).join(" ");
+	const baseline = (HISTORY_PAD_TOP + plotH).toFixed(2);
+	const areaPoints = `${xAt(0).toFixed(2)},${baseline} ${linePoints} ${xAt(points.length - 1).toFixed(2)},${baseline}`;
+
+	const ticks = niceTicks(min, max);
+	const tickStep = ticks.length > 1 ? ticks[1] - ticks[0] : spread;
+	for (const tick of ticks) {
+		const y = yAt(tick).toFixed(2);
+		svg.appendChild(svgEl("line", {
+			x1: HISTORY_PAD_X, x2: HISTORY_CHART_W - HISTORY_PAD_X, y1: y, y2: y,
+			class: "sm-history-grid",
+		}));
+	}
+
+	const starts = segmentStarts(points, range);
+	for (const i of starts) {
+		const x = xAt(i).toFixed(2);
+		svg.appendChild(svgEl("line", {
+			x1: x, x2: x, y1: HISTORY_PAD_TOP, y2: HISTORY_PAD_TOP + plotH,
+			class: "sm-history-sep",
+		}));
+	}
+
+	svg.appendChild(svgEl("polygon", { points: areaPoints, class: `sm-history-area ${cls}` }));
+	svg.appendChild(svgEl("polyline", { points: linePoints, class: `sm-history-line ${cls}`, fill: "none" }));
+
+	// L'axe Y est en HTML (et non dans le SVG) : `preserveAspectRatio: none`
+	// étire le viewBox horizontalement, ce qui déformerait le texte.
+	const plot = container.createDiv({ cls: "sm-history-plot" });
+	const yAxis = plot.createDiv({ cls: "sm-history-yaxis" });
+	for (const tick of ticks) {
+		const label = yAxis.createEl("span", { text: formatAxisValue(tick, tickStep) });
+		label.style.top = `${(yAt(tick) / HISTORY_CHART_H) * 100}%`;
+	}
+	plot.appendChild(svg);
+
+	if (range === "1y") {
+		// Une lettre par mois, centrée dans sa tranche. Elle remplace les dates
+		// de début/fin, qui tomberaient pile sous la première et la dernière.
+		const months = container.createDiv({ cls: "sm-history-months" });
+		const bounds = [0].concat(starts, [points.length - 1]);
+		for (let s = 0; s < bounds.length - 1; s++) {
+			const from = bounds[s];
+			const to = bounds[s + 1];
+			const letter = MONTH_LETTERS[parseDay(points[from].date).getMonth()];
+			const label = months.createEl("span", { text: letter });
+			label.style.left = `${((xAt(from) + xAt(to)) / 2 / HISTORY_CHART_W) * 100}%`;
+		}
+		return;
+	}
+
+	const axis = container.createDiv({ cls: "sm-history-axis" });
+	axis.createEl("span", { text: formatHistoryDate(points[0].date, range) });
+	axis.createEl("span", { text: formatHistoryDate(points[points.length - 1].date, range) });
+}
+
+export async function renderNetWorthHistoryChart(el: HTMLElement, app: App, settings: StockMarketSettings): Promise<void> {
+	const wrapper = el.createDiv({ cls: "sm-chart-wrapper" });
+	wrapper.createEl("h4", { text: "Performance du portefeuille", cls: "sm-section-title" });
+
+	const controls = wrapper.createDiv({ cls: "sm-history-controls" });
+	const body = wrapper.createDiv({ cls: "sm-history-body" });
+
+	let currentRange: HistoryRange = "7d";
+	const buttons = new Map<HistoryRange, HTMLElement>();
+
+	function setActive(range: HistoryRange): void {
+		buttons.forEach((btn, key) => btn.toggleClass("is-active", key === range));
+	}
+
+	async function renderForRange(): Promise<void> {
+		setActive(currentRange);
+		body.empty();
+		body.createEl("p", { text: "Chargement…", cls: "sm-chart-empty" });
+		try {
+			const transactions = await loadTransactions(app, settings);
+			const symbols = await loadSymbols(app, settings);
+			const symbolMap = buildSymbolMap(symbols);
+			const openHoldings = computePositions(transactions)
+				.filter(p => p.openQty > 0)
+				.map(p => ({
+					ticker: p.ticker,
+					currency: p.currency,
+					openQty: p.openQty,
+					buys: p.transactions
+						.filter(t => t.action === "buy")
+						.map(t => ({ date: t.date, quantity: t.quantity })),
+				}));
+			const { points, recentBuys } = await computePortfolioHistory(openHoldings, symbolMap, currentRange);
+
+			body.empty();
+			if (points.length < 2) {
+				const allRecent = recentBuys.length > 0 && recentBuys.every(r => r.dropped)
+					&& recentBuys.length === openHoldings.length;
+				body.createEl("p", {
+					text: allRecent
+						? "Tous les titres ont été achetés pendant cette période."
+						: "Pas assez de données pour cette période.",
+					cls: "sm-chart-empty",
+				});
+				return;
+			}
+			drawPortfolioLine(body, points, currentRange);
+			if (recentBuys.length > 0) {
+				const detail = recentBuys
+					.map(r => `${r.ticker} −${r.qty}${r.dropped ? " (position entière)" : ""}`)
+					.join(", ");
+				body.createEl("p", {
+					text: `Parts achetées pendant la période, exclues du calcul : ${detail}`,
+					cls: "sm-history-note",
+				});
+			}
+		} catch (e) {
+			body.empty();
+			body.createEl("p", { text: `Erreur : ${(e as Error).message}`, cls: "sm-error" });
+		}
+	}
+
+	for (const range of HISTORY_RANGES) {
+		const btn = controls.createEl("button", { text: range.label, cls: "sm-history-btn" });
+		buttons.set(range.key, btn);
+		btn.addEventListener("click", () => {
+			if (currentRange === range.key) return;
+			currentRange = range.key;
+			void renderForRange();
+		});
+	}
+
+	await renderForRange();
 }

@@ -17,6 +17,15 @@
   max-width: 100% !important;
 }
 
+/* Sur mobile, 32px de marge de chaque côté mange une part trop importante
+ * de l'écran — on la réduit pour laisser plus de place aux tableaux. */
+@media (max-width: 600px) {
+  .stock-transactions.markdown-preview-view .markdown-preview-sizer {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+}
+
 /* ── Cacher les propriétés et le titre ───────────────────── */
 .stock-transactions .inline-title {
   display: none;
@@ -48,14 +57,26 @@
   width: 100%;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   margin-top: 0.4em;
 }
+
+/*
+ * Colonnes à largeur fixe (et non `fr`) : chaque ligne (en-tête, résumé de
+ * position) est un contexte de grille indépendant. Avec des colonnes en `fr`,
+ * la largeur minimale de chaque colonne dépend du contenu de CETTE ligne
+ * (ex. longueur du ticker), donc deux lignes différentes finissent avec des
+ * frontières de colonnes différentes dès que le contenu déborde — d'où le
+ * désalignement en mobile. Des largeurs fixes garantissent des colonnes
+ * identiques sur toutes les lignes, quel que soit leur contenu.
+ */
 
 /* Colonnes : positions ouvertes (7 colonnes) */
 .sm-cols-open {
   display: grid;
-  grid-template-columns: 1.5fr 0.7fr 1.4fr 1.4fr 1.4fr 1.8fr 1.2fr;
+  grid-template-columns: 100px 55px 110px 110px 145px 165px 150px;
   gap: 0 8px;
   align-items: center;
 }
@@ -63,9 +84,16 @@
 /* Colonnes : positions fermées (5 colonnes) */
 .sm-cols-closed {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1.4fr 1.8fr 1.2fr;
+  grid-template-columns: 100px 130px 110px 195px 150px;
   gap: 0 8px;
   align-items: center;
+}
+
+.sm-cols-open span,
+.sm-cols-closed span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── En-tête ──────────────────────────────────────────────── */
@@ -82,6 +110,7 @@
   letter-spacing: 0.05em;
   color: var(--text-muted);
   font-family: var(--font-interface);
+  white-space: nowrap;
 }
 
 /* ── Position (tiroir) ────────────────────────────────────── */
@@ -384,4 +413,164 @@
 .sm-chart-bar-amount {
   color: var(--text-faint);
   font-size: 0.88em;
+}
+
+/* ── Historique — performance du portefeuille ────────────── */
+.sm-history-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 0.4em;
+}
+
+.sm-history-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 0.78em;
+  font-family: var(--font-interface);
+  cursor: pointer;
+}
+
+.sm-history-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.sm-history-btn.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.sm-history-body {
+  margin-top: 0.6em;
+}
+
+.sm-history-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--font-monospace);
+  margin-bottom: 4px;
+}
+
+.sm-history-value {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.sm-history-body {
+  --sm-yaxis-w: 58px;
+}
+
+.sm-history-plot {
+  display: flex;
+  align-items: stretch;
+}
+
+.sm-history-yaxis {
+  position: relative;
+  flex: 0 0 var(--sm-yaxis-w);
+  width: var(--sm-yaxis-w);
+}
+
+.sm-history-yaxis span {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 0.72em;
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+
+.sm-history-grid {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.sm-history-svg {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 180px;
+}
+
+.sm-history-line {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.sm-history-line.sm-positive {
+  stroke: var(--color-green);
+}
+
+.sm-history-line.sm-negative {
+  stroke: var(--color-red);
+}
+
+.sm-history-area.sm-positive {
+  fill: var(--color-green);
+  opacity: 0.12;
+}
+
+.sm-history-area.sm-negative {
+  fill: var(--color-red);
+  opacity: 0.12;
+}
+
+.sm-history-sep {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.sm-history-months {
+  position: relative;
+  height: 1.2em;
+  margin-left: var(--sm-yaxis-w);
+  margin-top: 4px;
+}
+
+.sm-history-months span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 0.76em;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+}
+
+.sm-history-note {
+  font-size: 0.74em;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  margin: 6px 0 0;
+}
+
+.sm-history-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-left: var(--sm-yaxis-w);
+  font-size: 0.76em;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  margin-top: 4px;
+}
+
+/* ── Responsive — scroll horizontal sur mobile ───────────── */
+/* Les colonnes de .sm-cols-open / .sm-cols-closed ont une largeur fixe
+ * (voir plus haut) : leur largeur totale dépasse déjà naturellement les
+ * petits écrans, donc .sm-grid scrolle sans avoir besoin de min-width. */
+.sm-detail {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sm-detail-table {
+  min-width: 480px;
 }

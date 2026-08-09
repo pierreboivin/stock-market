@@ -1,7 +1,7 @@
 import { MarkdownView, Plugin, WorkspaceLeaf } from "obsidian";
 import { AddTransactionModal } from "./src/modal";
 import { DEFAULT_SETTINGS, StockMarketSettingTab, StockMarketSettings } from "./src/settings";
-import { renderAllocationChart, renderPerformanceChart } from "./src/chart";
+import { renderAllocationChart, renderNetWorthHistoryChart, renderPerformanceChart } from "./src/chart";
 import { renderClosedPositions, renderOpenPositions, renderPositions } from "./src/ui";
 
 export default class StockMarketPlugin extends Plugin {
@@ -41,6 +41,12 @@ export default class StockMarketPlugin extends Plugin {
 			const cb = async () => { el.empty(); await renderPerformanceChart(el, this.app, this.settings); };
 			this.refreshCallbacks.set("stock-chart-performance", cb);
 			await renderPerformanceChart(el, this.app, this.settings);
+		});
+
+		this.registerMarkdownCodeBlockProcessor("stock-chart-history", async (_source, el) => {
+			const cb = async () => { el.empty(); await renderNetWorthHistoryChart(el, this.app, this.settings); };
+			this.refreshCallbacks.set("stock-chart-history", cb);
+			await renderNetWorthHistoryChart(el, this.app, this.settings);
 		});
 
 		this.app.workspace.onLayoutReady(() => this.updateAddAction());

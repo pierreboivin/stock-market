@@ -173,6 +173,14 @@ Visible en cliquant sur le `▶` d'une position :
 
 Les transactions avec un champ `note` affichent un indicateur `ⓘ` — survoler avec la souris révèle la note.
 
+### Performance globale du portefeuille
+
+```stock-chart-history
+
+```
+
+Affiche un graphique linéaire de la valeur totale du portefeuille (CAD), avec des boutons pour changer la période : **7 jours** (par défaut), **1 mois**, **1 an**. Les données sont récupérées en direct depuis l'API chart de Yahoo Finance à chaque changement de période — nécessite une connexion réseau. La conversion des tickers USD utilise le taux de change courant (pas le taux historique réel).
+
 ---
 
 ## Développement

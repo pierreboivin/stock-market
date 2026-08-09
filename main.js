@@ -22,7 +22,7 @@ __export(main_exports, {
   default: () => StockMarketPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/modal.ts
 var import_obsidian2 = require("obsidian");
@@ -105,12 +105,19 @@ async function loadTransactions(app, settings) {
 }
 
 // src/format.ts
+function groupThousands(fixed) {
+  const negative = fixed.charAt(0) === "-";
+  const unsigned = negative ? fixed.slice(1) : fixed;
+  const [intPart, decPart] = unsigned.split(".");
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return (negative ? "-" : "") + grouped + (decPart !== void 0 ? `.${decPart}` : "");
+}
 function fmtPrice(amount, currency) {
-  return `${amount.toFixed(2)} ${currency}`;
+  return `${groupThousands(amount.toFixed(2))} ${currency}`;
 }
 function fmtGain(amount, currency) {
   const sign = amount >= 0 ? "+" : "";
-  return `${sign}${amount.toFixed(2)} ${currency}`;
+  return `${sign}${groupThousands(amount.toFixed(2))} ${currency}`;
 }
 function fmtPct(pct) {
   const sign = pct >= 0 ? "+" : "";
@@ -260,6 +267,9 @@ var StockMarketSettingTab = class extends import_obsidian3.PluginSettingTab {
   }
 };
 
+// src/history.ts
+var import_obsidian4 = require("obsidian");
+
 // src/positions.ts
 function buildSymbolMap(symbols) {
   return new Map(symbols.map((s) => [s.symbol, s]));
@@ -309,6 +319,129 @@ function computePositions(transactions) {
     }
   }
   return Array.from(posMap.values());
+}
+
+// src/history.ts
+var HISTORY_RANGES = [
+  { key: "7d", label: "7 jours" },
+  { key: "1mo", label: "1 mois" },
+  { key: "1y", label: "1 an" }
+];
+function rangeInterval(range) {
+  return range === "1y" ? "1wk" : "1d";
+}
+function toDateKey(unixSeconds) {
+  return new Date(unixSeconds * 1e3).toISOString().slice(0, 10);
+}
+async function fetchYahooChart(symbol, range) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  const interval = rangeInterval(range);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+  try {
+    const resp = await (0, import_obsidian4.requestUrl)({ url });
+    const result = (_c = (_b = (_a = resp.json) == null ? void 0 : _a.chart) == null ? void 0 : _b.result) == null ? void 0 : _c[0];
+    if (!result) {
+      console.warn(`[stock-market/history] R\xE9ponse vide de Yahoo Finance pour "${symbol}" (range=${range}).`, resp.json);
+      return null;
+    }
+    const timestamp = (_d = result.timestamp) != null ? _d : [];
+    const close = (_h = (_g = (_f = (_e = result.indicators) == null ? void 0 : _e.quote) == null ? void 0 : _f[0]) == null ? void 0 : _g.close) != null ? _h : [];
+    if (timestamp.length === 0) {
+      console.warn(`[stock-market/history] Aucun point de donn\xE9es pour "${symbol}" (range=${range}).`);
+      return null;
+    }
+    return { timestamp, close };
+  } catch (e) {
+    console.warn(`[stock-market/history] \xC9chec de la requ\xEAte historique pour "${symbol}" (range=${range}) :`, e);
+    return null;
+  }
+}
+async function computePortfolioHistory(openHoldings, symbolMap, range) {
+  if (openHoldings.length === 0)
+    return { points: [], recentBuys: [] };
+  const perHolding = await Promise.all(openHoldings.map(async (holding) => {
+    const symbol = resolveSymbol(holding.ticker, holding.currency, symbolMap);
+    if (!symbol) {
+      console.warn(`[stock-market/history] Aucun symbole r\xE9solu pour le ticker "${holding.ticker}" (${holding.currency}) \u2014 exclu du graphique.`);
+      return null;
+    }
+    const chart = await fetchYahooChart(symbol.symbol, range);
+    if (!chart)
+      return null;
+    const fxRatio = symbol.price > 0 ? symbol.price_cad / symbol.price : 1;
+    const closesByDate = /* @__PURE__ */ new Map();
+    for (let i = 0; i < chart.timestamp.length; i++) {
+      const close = chart.close[i];
+      if (close == null)
+        continue;
+      closesByDate.set(toDateKey(chart.timestamp[i]), close * fxRatio);
+    }
+    if (closesByDate.size === 0) {
+      console.warn(`[stock-market/history] Aucune cl\xF4ture valide dans la r\xE9ponse Yahoo Finance pour "${symbol.symbol}".`);
+      return null;
+    }
+    return { ticker: holding.ticker, qty: holding.openQty, buys: holding.buys, closesByDate };
+  }));
+  const fetched = perHolding.filter((x) => x !== null);
+  if (fetched.length < openHoldings.length) {
+    const resolved = new Set(fetched.map((v) => v.ticker));
+    const missing = openHoldings.filter((h) => !resolved.has(h.ticker)).map((h) => h.ticker);
+    console.warn(`[stock-market/history] ${missing.length}/${openHoldings.length} titre(s) exclu(s) du graphique (voir logs ci-dessus) : ${missing.join(", ")}`);
+  }
+  const recentBuys = [];
+  if (fetched.length === 0)
+    return { points: [], recentBuys };
+  const windowStart = Array.from(new Set(fetched.flatMap((v) => Array.from(v.closesByDate.keys())))).sort()[0];
+  let valid = fetched;
+  if (range === "7d") {
+    valid = [];
+    for (const v of fetched) {
+      const boughtInWindow = v.buys.filter((b) => b.date > windowStart).reduce((sum, b) => sum + b.quantity, 0);
+      const qty = v.qty - boughtInWindow;
+      if (boughtInWindow > 0) {
+        recentBuys.push({ ticker: v.ticker, qty: boughtInWindow, dropped: qty <= 0 });
+      }
+      if (qty > 0)
+        valid.push({ ...v, qty });
+    }
+    if (recentBuys.length > 0) {
+      const detail = recentBuys.map((r) => `${r.ticker} \u2212${r.qty}${r.dropped ? " (position enti\xE8re)" : ""}`).join(", ");
+      console.warn(`[stock-market/history] Parts achet\xE9es depuis le ${windowStart} retir\xE9es du graphique 7 jours : ${detail}`);
+    }
+  }
+  if (valid.length === 0)
+    return { points: [], recentBuys };
+  const allDatesSet = /* @__PURE__ */ new Set();
+  for (const v of valid) {
+    for (const d of v.closesByDate.keys())
+      allDatesSet.add(d);
+  }
+  const allDates = Array.from(allDatesSet).sort();
+  const lastKnownPrice = /* @__PURE__ */ new Map();
+  const backfilled = [];
+  for (let idx = 0; idx < valid.length; idx++) {
+    const dates = Array.from(valid[idx].closesByDate.keys()).sort();
+    lastKnownPrice.set(idx, valid[idx].closesByDate.get(dates[0]));
+    if (dates[0] !== allDates[0])
+      backfilled.push(`${valid[idx].ticker} (d\xE8s ${dates[0]})`);
+  }
+  if (backfilled.length > 0) {
+    console.warn(`[stock-market/history] ${backfilled.length}/${valid.length} titre(s) sans prix au d\xE9but de la p\xE9riode \u2014 prix le plus ancien report\xE9 en arri\xE8re : ${backfilled.join(", ")}`);
+  }
+  const points = [];
+  for (const date of allDates) {
+    for (let idx = 0; idx < valid.length; idx++) {
+      const close = valid[idx].closesByDate.get(date);
+      if (close != null)
+        lastKnownPrice.set(idx, close);
+    }
+    let total = 0;
+    for (let idx = 0; idx < valid.length; idx++) {
+      total += valid[idx].qty * lastKnownPrice.get(idx);
+    }
+    points.push({ date, valueCad: total });
+  }
+  return { points, recentBuys };
 }
 
 // src/chart.ts
@@ -478,6 +611,200 @@ async function renderPerformanceChart(el, app, settings) {
     el.createEl("p", { text: `Erreur : ${e.message}`, cls: "sm-error" });
   }
 }
+var HISTORY_CHART_W = 640;
+var HISTORY_CHART_H = 220;
+var HISTORY_PAD_TOP = 16;
+var HISTORY_PAD_BOTTOM = 12;
+var HISTORY_PAD_X = 8;
+function niceStep(raw) {
+  const exp = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+  const frac = raw / exp;
+  if (frac <= 1)
+    return exp;
+  if (frac <= 2)
+    return 2 * exp;
+  if (frac <= 5)
+    return 5 * exp;
+  return 10 * exp;
+}
+function niceTicks(min, max) {
+  const spread = max - min;
+  if (spread <= 0)
+    return [min];
+  const step = niceStep(spread / 4);
+  const ticks = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-6; v += step) {
+    ticks.push(v);
+  }
+  return ticks;
+}
+function formatAxisValue(v, step) {
+  const decimals = step >= 10 ? 0 : step >= 1 ? 1 : 2;
+  return v.toLocaleString("fr-CA", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+var MONTH_LETTERS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+function parseDay(dateStr) {
+  return new Date(`${dateStr}T00:00:00`);
+}
+function weekKey(d) {
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (d.getDay() + 6) % 7);
+  return monday.toDateString();
+}
+function segmentStarts(points, range) {
+  if (range === "7d")
+    return [];
+  const starts = [];
+  for (let i = 1; i < points.length; i++) {
+    const cur = parseDay(points[i].date);
+    const prev = parseDay(points[i - 1].date);
+    const changed = range === "1y" ? cur.getMonth() !== prev.getMonth() : weekKey(cur) !== weekKey(prev);
+    if (changed)
+      starts.push(i);
+  }
+  return starts;
+}
+function formatHistoryDate(dateStr, range) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (range === "1y")
+    return d.toLocaleDateString("fr-CA", { month: "short", year: "2-digit" });
+  return d.toLocaleDateString("fr-CA", { day: "2-digit", month: "short" });
+}
+function drawPortfolioLine(container, points, range) {
+  const values = points.map((p) => p.valueCad);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = max - min || 1;
+  const plotW = HISTORY_CHART_W - HISTORY_PAD_X * 2;
+  const plotH = HISTORY_CHART_H - HISTORY_PAD_TOP - HISTORY_PAD_BOTTOM;
+  const xAt = (i) => HISTORY_PAD_X + (points.length > 1 ? i / (points.length - 1) * plotW : plotW / 2);
+  const yAt = (v) => HISTORY_PAD_TOP + plotH - (v - min) / spread * plotH;
+  const first = values[0];
+  const last = values[values.length - 1];
+  const changeAmt = last - first;
+  const changePct = first > 0 ? changeAmt / first * 100 : 0;
+  const cls = gainClass(changeAmt);
+  const summary = container.createDiv({ cls: "sm-history-summary" });
+  summary.createEl("span", {
+    text: `${last.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`,
+    cls: "sm-history-value"
+  });
+  summary.createEl("span", { text: `${fmtGain(changeAmt, "CAD")} (${fmtPct(changePct)})`, cls });
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${HISTORY_CHART_W} ${HISTORY_CHART_H}`,
+    preserveAspectRatio: "none",
+    class: "sm-history-svg"
+  });
+  const linePoints = points.map((p, i) => `${xAt(i).toFixed(2)},${yAt(p.valueCad).toFixed(2)}`).join(" ");
+  const baseline = (HISTORY_PAD_TOP + plotH).toFixed(2);
+  const areaPoints = `${xAt(0).toFixed(2)},${baseline} ${linePoints} ${xAt(points.length - 1).toFixed(2)},${baseline}`;
+  const ticks = niceTicks(min, max);
+  const tickStep = ticks.length > 1 ? ticks[1] - ticks[0] : spread;
+  for (const tick of ticks) {
+    const y = yAt(tick).toFixed(2);
+    svg.appendChild(svgEl("line", {
+      x1: HISTORY_PAD_X,
+      x2: HISTORY_CHART_W - HISTORY_PAD_X,
+      y1: y,
+      y2: y,
+      class: "sm-history-grid"
+    }));
+  }
+  const starts = segmentStarts(points, range);
+  for (const i of starts) {
+    const x = xAt(i).toFixed(2);
+    svg.appendChild(svgEl("line", {
+      x1: x,
+      x2: x,
+      y1: HISTORY_PAD_TOP,
+      y2: HISTORY_PAD_TOP + plotH,
+      class: "sm-history-sep"
+    }));
+  }
+  svg.appendChild(svgEl("polygon", { points: areaPoints, class: `sm-history-area ${cls}` }));
+  svg.appendChild(svgEl("polyline", { points: linePoints, class: `sm-history-line ${cls}`, fill: "none" }));
+  const plot = container.createDiv({ cls: "sm-history-plot" });
+  const yAxis = plot.createDiv({ cls: "sm-history-yaxis" });
+  for (const tick of ticks) {
+    const label = yAxis.createEl("span", { text: formatAxisValue(tick, tickStep) });
+    label.style.top = `${yAt(tick) / HISTORY_CHART_H * 100}%`;
+  }
+  plot.appendChild(svg);
+  if (range === "1y") {
+    const months = container.createDiv({ cls: "sm-history-months" });
+    const bounds = [0].concat(starts, [points.length - 1]);
+    for (let s = 0; s < bounds.length - 1; s++) {
+      const from = bounds[s];
+      const to = bounds[s + 1];
+      const letter = MONTH_LETTERS[parseDay(points[from].date).getMonth()];
+      const label = months.createEl("span", { text: letter });
+      label.style.left = `${(xAt(from) + xAt(to)) / 2 / HISTORY_CHART_W * 100}%`;
+    }
+    return;
+  }
+  const axis = container.createDiv({ cls: "sm-history-axis" });
+  axis.createEl("span", { text: formatHistoryDate(points[0].date, range) });
+  axis.createEl("span", { text: formatHistoryDate(points[points.length - 1].date, range) });
+}
+async function renderNetWorthHistoryChart(el, app, settings) {
+  const wrapper = el.createDiv({ cls: "sm-chart-wrapper" });
+  wrapper.createEl("h4", { text: "Performance du portefeuille", cls: "sm-section-title" });
+  const controls = wrapper.createDiv({ cls: "sm-history-controls" });
+  const body = wrapper.createDiv({ cls: "sm-history-body" });
+  let currentRange = "7d";
+  const buttons = /* @__PURE__ */ new Map();
+  function setActive(range) {
+    buttons.forEach((btn, key) => btn.toggleClass("is-active", key === range));
+  }
+  async function renderForRange() {
+    setActive(currentRange);
+    body.empty();
+    body.createEl("p", { text: "Chargement\u2026", cls: "sm-chart-empty" });
+    try {
+      const transactions = await loadTransactions(app, settings);
+      const symbols = await loadSymbols(app, settings);
+      const symbolMap = buildSymbolMap(symbols);
+      const openHoldings = computePositions(transactions).filter((p) => p.openQty > 0).map((p) => ({
+        ticker: p.ticker,
+        currency: p.currency,
+        openQty: p.openQty,
+        buys: p.transactions.filter((t) => t.action === "buy").map((t) => ({ date: t.date, quantity: t.quantity }))
+      }));
+      const { points, recentBuys } = await computePortfolioHistory(openHoldings, symbolMap, currentRange);
+      body.empty();
+      if (points.length < 2) {
+        const allRecent = recentBuys.length > 0 && recentBuys.every((r) => r.dropped) && recentBuys.length === openHoldings.length;
+        body.createEl("p", {
+          text: allRecent ? "Tous les titres ont \xE9t\xE9 achet\xE9s pendant cette p\xE9riode." : "Pas assez de donn\xE9es pour cette p\xE9riode.",
+          cls: "sm-chart-empty"
+        });
+        return;
+      }
+      drawPortfolioLine(body, points, currentRange);
+      if (recentBuys.length > 0) {
+        const detail = recentBuys.map((r) => `${r.ticker} \u2212${r.qty}${r.dropped ? " (position enti\xE8re)" : ""}`).join(", ");
+        body.createEl("p", {
+          text: `Parts achet\xE9es pendant la p\xE9riode, exclues du calcul : ${detail}`,
+          cls: "sm-history-note"
+        });
+      }
+    } catch (e) {
+      body.empty();
+      body.createEl("p", { text: `Erreur : ${e.message}`, cls: "sm-error" });
+    }
+  }
+  for (const range of HISTORY_RANGES) {
+    const btn = controls.createEl("button", { text: range.label, cls: "sm-history-btn" });
+    buttons.set(range.key, btn);
+    btn.addEventListener("click", () => {
+      if (currentRange === range.key)
+        return;
+      currentRange = range.key;
+      void renderForRange();
+    });
+  }
+  await renderForRange();
+}
 
 // src/ui.ts
 function formatUpdatedAt(iso) {
@@ -620,7 +947,7 @@ async function renderPositions(el, app, settings) {
 }
 
 // main.ts
-var StockMarketPlugin = class extends import_obsidian4.Plugin {
+var StockMarketPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -670,6 +997,14 @@ var StockMarketPlugin = class extends import_obsidian4.Plugin {
       this.refreshCallbacks.set("stock-chart-performance", cb);
       await renderPerformanceChart(el, this.app, this.settings);
     });
+    this.registerMarkdownCodeBlockProcessor("stock-chart-history", async (_source, el) => {
+      const cb = async () => {
+        el.empty();
+        await renderNetWorthHistoryChart(el, this.app, this.settings);
+      };
+      this.refreshCallbacks.set("stock-chart-history", cb);
+      await renderNetWorthHistoryChart(el, this.app, this.settings);
+    });
     this.app.workspace.onLayoutReady(() => this.updateAddAction());
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -689,7 +1024,7 @@ var StockMarketPlugin = class extends import_obsidian4.Plugin {
     (_a = this.actionEl) == null ? void 0 : _a.remove();
     this.actionEl = null;
     const file = this.app.workspace.getActiveFile();
-    const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
     if (!file || !markdownView)
       return;
     const frontmatter = (_b = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _b.frontmatter;
@@ -710,7 +1045,7 @@ var StockMarketPlugin = class extends import_obsidian4.Plugin {
     if (!leaf)
       return;
     const view = leaf.view;
-    if (!(view instanceof import_obsidian4.MarkdownView))
+    if (!(view instanceof import_obsidian5.MarkdownView))
       return;
     const file = view.file;
     if (!file)
