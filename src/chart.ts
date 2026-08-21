@@ -1,7 +1,7 @@
 import { App } from "obsidian";
 import { loadSymbols, loadTransactions } from "./data";
-import { fmtGain, fmtPct, gainClass } from "./format";
-import { computePortfolioHistory, HISTORY_RANGES, HistoryRange, PortfolioPoint } from "./history";
+import { fmtCad, fmtGain, fmtPct, gainClass } from "./format";
+import { computePortfolioHistory, HistoryFailure, HISTORY_RANGES, HistoryRange, PortfolioPoint } from "./history";
 import { buildSymbolMap, computePositions, resolveSymbol } from "./positions";
 import { StockMarketSettings } from "./settings";
 import { SymbolInfo } from "./types";
@@ -118,7 +118,7 @@ export async function renderAllocationChart(el: HTMLElement, app: App, settings:
 			"font-weight": "600",
 			"font-family": "var(--font-monospace)",
 		});
-		totalEl.textContent = `${total.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`;
+		totalEl.textContent = fmtCad(total);
 		svg.appendChild(totalEl);
 
 		inner.appendChild(svg);
@@ -132,7 +132,7 @@ export async function renderAllocationChart(el: HTMLElement, app: App, settings:
 			swatch.style.background = item.color;
 			row.createEl("span", { text: item.ticker, cls: "sm-chart-legend-ticker" });
 			row.createEl("span", { text: `${pct.toFixed(1)} %`, cls: "sm-chart-legend-pct" });
-			row.createEl("span", { text: `${item.value.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`, cls: "sm-chart-legend-value" });
+			row.createEl("span", { text: fmtCad(item.value), cls: "sm-chart-legend-value" });
 		}
 	} catch (e) {
 		el.createEl("p", { text: `Erreur : ${(e as Error).message}`, cls: "sm-error" });
@@ -281,10 +281,7 @@ function drawPortfolioLine(container: HTMLElement, points: PortfolioPoint[], ran
 	const cls = gainClass(changeAmt);
 
 	const summary = container.createDiv({ cls: "sm-history-summary" });
-	summary.createEl("span", {
-		text: `${last.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`,
-		cls: "sm-history-value",
-	});
+	summary.createEl("span", { text: fmtCad(last), cls: "sm-history-value" });
 	summary.createEl("span", { text: `${fmtGain(changeAmt, "CAD")} (${fmtPct(changePct)})`, cls });
 
 	const svg = svgEl("svg", {
@@ -349,6 +346,23 @@ function drawPortfolioLine(container: HTMLElement, points: PortfolioPoint[], ran
 	axis.createEl("span", { text: formatHistoryDate(points[points.length - 1].date, range) });
 }
 
+/**
+ * Regroupe les échecs par raison — « 429 » sur seize titres est UNE panne, pas
+ * seize. La liste des tickers reste, pour distinguer un symbole fautif d'une
+ * limitation générale.
+ */
+function describeFailures(failures: HistoryFailure[]): string {
+	const byReason = new Map<string, string[]>();
+	for (const failure of failures) {
+		const tickers = byReason.get(failure.reason);
+		if (tickers) tickers.push(failure.ticker);
+		else byReason.set(failure.reason, [failure.ticker]);
+	}
+	const parts: string[] = [];
+	byReason.forEach((tickers, reason) => parts.push(`${reason} : ${tickers.join(", ")}`));
+	return parts.join(" — ");
+}
+
 export async function renderNetWorthHistoryChart(el: HTMLElement, app: App, settings: StockMarketSettings): Promise<void> {
 	const wrapper = el.createDiv({ cls: "sm-chart-wrapper" });
 	wrapper.createEl("h4", { text: "Performance du portefeuille", cls: "sm-section-title" });
@@ -381,10 +395,17 @@ export async function renderNetWorthHistoryChart(el: HTMLElement, app: App, sett
 						.filter(t => t.action === "buy")
 						.map(t => ({ date: t.date, quantity: t.quantity })),
 				}));
-			const { points, recentBuys } = await computePortfolioHistory(openHoldings, symbolMap, currentRange);
+			const { points, recentBuys, failures } = computePortfolioHistory(openHoldings, symbolMap, currentRange);
 
 			body.empty();
 			if (points.length < 2) {
+				if (failures.length > 0) {
+					body.createEl("p", {
+						text: `Cours indisponibles pour ${failures.length} titre(s) sur ${openHoldings.length}. ${describeFailures(failures)}`,
+						cls: "sm-error",
+					});
+					return;
+				}
 				const allRecent = recentBuys.length > 0 && recentBuys.every(r => r.dropped)
 					&& recentBuys.length === openHoldings.length;
 				body.createEl("p", {
@@ -402,6 +423,14 @@ export async function renderNetWorthHistoryChart(el: HTMLElement, app: App, sett
 					.join(", ");
 				body.createEl("p", {
 					text: `Parts achetées pendant la période, exclues du calcul : ${detail}`,
+					cls: "sm-history-note",
+				});
+			}
+			// Un titre manquant fausse la courbe en silence — le dire même quand
+			// le graphique a pu être tracé avec les autres.
+			if (failures.length > 0) {
+				body.createEl("p", {
+					text: `Absents du graphique — ${describeFailures(failures)}`,
 					cls: "sm-history-note",
 				});
 			}

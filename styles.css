@@ -574,3 +574,19 @@
 .sm-detail-table {
   min-width: 480px;
 }
+
+/* Le `white-space: nowrap` plus haut est à (0,1,1) : n'importe quelle règle
+ * de l'app ou du thème visant `.markdown-rendered table td` le bat et remet
+ * les cellules en `normal`, ce qui coupe les montants en plein milieu sur les
+ * écrans étroits. Le vrai correctif est en amont (séparateurs insécables dans
+ * `format.ts`) ; ceci est la ceinture en plus des bretelles, pour le contenu
+ * qui n'y passerait pas. Le débordement part dans le scroll de `.sm-detail`. */
+.sm-detail .sm-detail-table th,
+.sm-detail .sm-detail-table td {
+  white-space: nowrap !important;
+}
+
+/* Bouton « Réessayer » sous un message d'erreur du graphique. */
+.sm-history-body .sm-error + .sm-history-btn {
+  margin-top: 6px;
+}

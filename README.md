@@ -179,7 +179,9 @@ Les transactions avec un champ `note` affichent un indicateur `ⓘ` — survoler
 
 ```
 
-Affiche un graphique linéaire de la valeur totale du portefeuille (CAD), avec des boutons pour changer la période : **7 jours** (par défaut), **1 mois**, **1 an**. Les données sont récupérées en direct depuis l'API chart de Yahoo Finance à chaque changement de période — nécessite une connexion réseau. La conversion des tickers USD utilise le taux de change courant (pas le taux historique réel).
+Affiche un graphique linéaire de la valeur totale du portefeuille (CAD), avec des boutons pour changer la période : **7 jours** (par défaut), **1 mois**, **1 an**. Les données sont récupérées en direct depuis l'API chart de Yahoo Finance — nécessite une connexion réseau. La conversion des tickers USD utilise le taux de change courant (pas le taux historique réel).
+
+Yahoo limite le nombre de requêtes par adresse IP. Les cours sont donc demandés deux à la fois plutôt que tous d'un coup, gardés en mémoire 15 minutes (revenir à une période déjà affichée ne redemande rien), et repris automatiquement en cas de refus passager. Si Yahoo bloque quand même — ce qui arrive surtout sur un réseau cellulaire, dont l'adresse est partagée entre abonnés — le graphique le dit et propose **Réessayer** au lieu d'un message vague. Un titre absent est nommé sous le graphique même quand la courbe a pu être tracée sans lui.
 
 ---
 

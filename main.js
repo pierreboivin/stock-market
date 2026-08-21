@@ -22,7 +22,7 @@ __export(main_exports, {
   default: () => StockMarketPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/modal.ts
 var import_obsidian2 = require("obsidian");
@@ -105,23 +105,27 @@ async function loadTransactions(app, settings) {
 }
 
 // src/format.ts
+var NBSP = "\xA0";
 function groupThousands(fixed) {
   const negative = fixed.charAt(0) === "-";
   const unsigned = negative ? fixed.slice(1) : fixed;
   const [intPart, decPart] = unsigned.split(".");
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
   return (negative ? "-" : "") + grouped + (decPart !== void 0 ? `.${decPart}` : "");
 }
 function fmtPrice(amount, currency) {
-  return `${groupThousands(amount.toFixed(2))} ${currency}`;
+  return `${groupThousands(amount.toFixed(2))}${NBSP}${currency}`;
 }
 function fmtGain(amount, currency) {
   const sign = amount >= 0 ? "+" : "";
-  return `${sign}${groupThousands(amount.toFixed(2))} ${currency}`;
+  return `${sign}${groupThousands(amount.toFixed(2))}${NBSP}${currency}`;
 }
 function fmtPct(pct) {
   const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(2)} %`;
+  return `${sign}${pct.toFixed(2)}${NBSP}%`;
+}
+function fmtCad(amount) {
+  return `${amount.toLocaleString("fr-CA", { maximumFractionDigits: 0 }).replace(/\s/g, NBSP)}${NBSP}CAD`;
 }
 function gainClass(amount) {
   return amount >= 0 ? "sm-positive" : "sm-negative";
@@ -267,9 +271,6 @@ var StockMarketSettingTab = class extends import_obsidian3.PluginSettingTab {
   }
 };
 
-// src/history.ts
-var import_obsidian4 = require("obsidian");
-
 // src/positions.ts
 function buildSymbolMap(symbols) {
   return new Map(symbols.map((s) => [s.symbol, s]));
@@ -327,70 +328,50 @@ var HISTORY_RANGES = [
   { key: "1mo", label: "1 mois" },
   { key: "1y", label: "1 an" }
 ];
-function rangeInterval(range) {
-  return range === "1y" ? "1wk" : "1d";
+function cutoffDate(range) {
+  const d = new Date();
+  if (range === "7d")
+    d.setDate(d.getDate() - 7);
+  else if (range === "1mo")
+    d.setMonth(d.getMonth() - 1);
+  else
+    d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().slice(0, 10);
 }
-function toDateKey(unixSeconds) {
-  return new Date(unixSeconds * 1e3).toISOString().slice(0, 10);
-}
-async function fetchYahooChart(symbol, range) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
-  const interval = rangeInterval(range);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
-  try {
-    const resp = await (0, import_obsidian4.requestUrl)({ url });
-    const result = (_c = (_b = (_a = resp.json) == null ? void 0 : _a.chart) == null ? void 0 : _b.result) == null ? void 0 : _c[0];
-    if (!result) {
-      console.warn(`[stock-market/history] R\xE9ponse vide de Yahoo Finance pour "${symbol}" (range=${range}).`, resp.json);
-      return null;
-    }
-    const timestamp = (_d = result.timestamp) != null ? _d : [];
-    const close = (_h = (_g = (_f = (_e = result.indicators) == null ? void 0 : _e.quote) == null ? void 0 : _f[0]) == null ? void 0 : _g.close) != null ? _h : [];
-    if (timestamp.length === 0) {
-      console.warn(`[stock-market/history] Aucun point de donn\xE9es pour "${symbol}" (range=${range}).`);
-      return null;
-    }
-    return { timestamp, close };
-  } catch (e) {
-    console.warn(`[stock-market/history] \xC9chec de la requ\xEAte historique pour "${symbol}" (range=${range}) :`, e);
-    return null;
-  }
-}
-async function computePortfolioHistory(openHoldings, symbolMap, range) {
+function computePortfolioHistory(openHoldings, symbolMap, range) {
   if (openHoldings.length === 0)
-    return { points: [], recentBuys: [] };
-  const perHolding = await Promise.all(openHoldings.map(async (holding) => {
+    return { points: [], recentBuys: [], failures: [] };
+  const cutoff = cutoffDate(range);
+  const fetched = [];
+  const failures = [];
+  for (const holding of openHoldings) {
     const symbol = resolveSymbol(holding.ticker, holding.currency, symbolMap);
     if (!symbol) {
-      console.warn(`[stock-market/history] Aucun symbole r\xE9solu pour le ticker "${holding.ticker}" (${holding.currency}) \u2014 exclu du graphique.`);
-      return null;
+      failures.push({ ticker: holding.ticker, reason: "absent de symbols.json" });
+      continue;
     }
-    const chart = await fetchYahooChart(symbol.symbol, range);
-    if (!chart)
-      return null;
-    const fxRatio = symbol.price > 0 ? symbol.price_cad / symbol.price : 1;
+    if (!symbol.history || symbol.history.length === 0) {
+      failures.push({ ticker: holding.ticker, reason: "aucun historique dans symbols.json" });
+      continue;
+    }
     const closesByDate = /* @__PURE__ */ new Map();
-    for (let i = 0; i < chart.timestamp.length; i++) {
-      const close = chart.close[i];
-      if (close == null)
-        continue;
-      closesByDate.set(toDateKey(chart.timestamp[i]), close * fxRatio);
+    for (const point of symbol.history) {
+      if (point.date >= cutoff)
+        closesByDate.set(point.date, point.price_cad);
     }
     if (closesByDate.size === 0) {
-      console.warn(`[stock-market/history] Aucune cl\xF4ture valide dans la r\xE9ponse Yahoo Finance pour "${symbol.symbol}".`);
-      return null;
+      failures.push({ ticker: holding.ticker, reason: "aucune cl\xF4ture sur la p\xE9riode" });
+      continue;
     }
-    return { ticker: holding.ticker, qty: holding.openQty, buys: holding.buys, closesByDate };
-  }));
-  const fetched = perHolding.filter((x) => x !== null);
-  if (fetched.length < openHoldings.length) {
-    const resolved = new Set(fetched.map((v) => v.ticker));
-    const missing = openHoldings.filter((h) => !resolved.has(h.ticker)).map((h) => h.ticker);
-    console.warn(`[stock-market/history] ${missing.length}/${openHoldings.length} titre(s) exclu(s) du graphique (voir logs ci-dessus) : ${missing.join(", ")}`);
+    fetched.push({ ticker: holding.ticker, qty: holding.openQty, buys: holding.buys, closesByDate });
+  }
+  if (failures.length > 0) {
+    const detail = failures.map((f) => `${f.ticker} (${f.reason})`).join(", ");
+    console.warn(`[stock-market/history] ${failures.length}/${openHoldings.length} titre(s) exclu(s) du graphique : ${detail}`);
   }
   const recentBuys = [];
   if (fetched.length === 0)
-    return { points: [], recentBuys };
+    return { points: [], recentBuys, failures };
   const windowStart = Array.from(new Set(fetched.flatMap((v) => Array.from(v.closesByDate.keys())))).sort()[0];
   let valid = fetched;
   if (range === "7d") {
@@ -410,7 +391,7 @@ async function computePortfolioHistory(openHoldings, symbolMap, range) {
     }
   }
   if (valid.length === 0)
-    return { points: [], recentBuys };
+    return { points: [], recentBuys, failures };
   const allDatesSet = /* @__PURE__ */ new Set();
   for (const v of valid) {
     for (const d of v.closesByDate.keys())
@@ -426,7 +407,7 @@ async function computePortfolioHistory(openHoldings, symbolMap, range) {
       backfilled.push(`${valid[idx].ticker} (d\xE8s ${dates[0]})`);
   }
   if (backfilled.length > 0) {
-    console.warn(`[stock-market/history] ${backfilled.length}/${valid.length} titre(s) sans prix au d\xE9but de la p\xE9riode \u2014 prix le plus ancien report\xE9 en arri\xE8re : ${backfilled.join(", ")}`);
+    console.warn(`[stock-market/history] ${backfilled.length}/${valid.length} titre(s) sans historique au d\xE9but de la p\xE9riode \u2014 prix le plus ancien report\xE9 en arri\xE8re : ${backfilled.join(", ")}`);
   }
   const points = [];
   for (const date of allDates) {
@@ -441,7 +422,7 @@ async function computePortfolioHistory(openHoldings, symbolMap, range) {
     }
     points.push({ date, valueCad: total });
   }
-  return { points, recentBuys };
+  return { points, recentBuys, failures };
 }
 
 // src/chart.ts
@@ -550,7 +531,7 @@ async function renderAllocationChart(el, app, settings) {
       "font-weight": "600",
       "font-family": "var(--font-monospace)"
     });
-    totalEl.textContent = `${total.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`;
+    totalEl.textContent = fmtCad(total);
     svg.appendChild(totalEl);
     inner.appendChild(svg);
     const legend = inner.createDiv({ cls: "sm-chart-legend" });
@@ -562,7 +543,7 @@ async function renderAllocationChart(el, app, settings) {
       swatch.style.background = item.color;
       row.createEl("span", { text: item.ticker, cls: "sm-chart-legend-ticker" });
       row.createEl("span", { text: `${pct.toFixed(1)} %`, cls: "sm-chart-legend-pct" });
-      row.createEl("span", { text: `${item.value.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`, cls: "sm-chart-legend-value" });
+      row.createEl("span", { text: fmtCad(item.value), cls: "sm-chart-legend-value" });
     }
   } catch (e) {
     el.createEl("p", { text: `Erreur : ${e.message}`, cls: "sm-error" });
@@ -685,10 +666,7 @@ function drawPortfolioLine(container, points, range) {
   const changePct = first > 0 ? changeAmt / first * 100 : 0;
   const cls = gainClass(changeAmt);
   const summary = container.createDiv({ cls: "sm-history-summary" });
-  summary.createEl("span", {
-    text: `${last.toLocaleString("fr-CA", { maximumFractionDigits: 0 })} CAD`,
-    cls: "sm-history-value"
-  });
+  summary.createEl("span", { text: fmtCad(last), cls: "sm-history-value" });
   summary.createEl("span", { text: `${fmtGain(changeAmt, "CAD")} (${fmtPct(changePct)})`, cls });
   const svg = svgEl("svg", {
     viewBox: `0 0 ${HISTORY_CHART_W} ${HISTORY_CHART_H}`,
@@ -746,6 +724,19 @@ function drawPortfolioLine(container, points, range) {
   axis.createEl("span", { text: formatHistoryDate(points[0].date, range) });
   axis.createEl("span", { text: formatHistoryDate(points[points.length - 1].date, range) });
 }
+function describeFailures(failures) {
+  const byReason = /* @__PURE__ */ new Map();
+  for (const failure of failures) {
+    const tickers = byReason.get(failure.reason);
+    if (tickers)
+      tickers.push(failure.ticker);
+    else
+      byReason.set(failure.reason, [failure.ticker]);
+  }
+  const parts = [];
+  byReason.forEach((tickers, reason) => parts.push(`${reason} : ${tickers.join(", ")}`));
+  return parts.join(" \u2014 ");
+}
 async function renderNetWorthHistoryChart(el, app, settings) {
   const wrapper = el.createDiv({ cls: "sm-chart-wrapper" });
   wrapper.createEl("h4", { text: "Performance du portefeuille", cls: "sm-section-title" });
@@ -770,9 +761,16 @@ async function renderNetWorthHistoryChart(el, app, settings) {
         openQty: p.openQty,
         buys: p.transactions.filter((t) => t.action === "buy").map((t) => ({ date: t.date, quantity: t.quantity }))
       }));
-      const { points, recentBuys } = await computePortfolioHistory(openHoldings, symbolMap, currentRange);
+      const { points, recentBuys, failures } = computePortfolioHistory(openHoldings, symbolMap, currentRange);
       body.empty();
       if (points.length < 2) {
+        if (failures.length > 0) {
+          body.createEl("p", {
+            text: `Cours indisponibles pour ${failures.length} titre(s) sur ${openHoldings.length}. ${describeFailures(failures)}`,
+            cls: "sm-error"
+          });
+          return;
+        }
         const allRecent = recentBuys.length > 0 && recentBuys.every((r) => r.dropped) && recentBuys.length === openHoldings.length;
         body.createEl("p", {
           text: allRecent ? "Tous les titres ont \xE9t\xE9 achet\xE9s pendant cette p\xE9riode." : "Pas assez de donn\xE9es pour cette p\xE9riode.",
@@ -785,6 +783,12 @@ async function renderNetWorthHistoryChart(el, app, settings) {
         const detail = recentBuys.map((r) => `${r.ticker} \u2212${r.qty}${r.dropped ? " (position enti\xE8re)" : ""}`).join(", ");
         body.createEl("p", {
           text: `Parts achet\xE9es pendant la p\xE9riode, exclues du calcul : ${detail}`,
+          cls: "sm-history-note"
+        });
+      }
+      if (failures.length > 0) {
+        body.createEl("p", {
+          text: `Absents du graphique \u2014 ${describeFailures(failures)}`,
           cls: "sm-history-note"
         });
       }
@@ -947,7 +951,7 @@ async function renderPositions(el, app, settings) {
 }
 
 // main.ts
-var StockMarketPlugin = class extends import_obsidian5.Plugin {
+var StockMarketPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -1024,7 +1028,7 @@ var StockMarketPlugin = class extends import_obsidian5.Plugin {
     (_a = this.actionEl) == null ? void 0 : _a.remove();
     this.actionEl = null;
     const file = this.app.workspace.getActiveFile();
-    const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
     if (!file || !markdownView)
       return;
     const frontmatter = (_b = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _b.frontmatter;
@@ -1045,7 +1049,7 @@ var StockMarketPlugin = class extends import_obsidian5.Plugin {
     if (!leaf)
       return;
     const view = leaf.view;
-    if (!(view instanceof import_obsidian5.MarkdownView))
+    if (!(view instanceof import_obsidian4.MarkdownView))
       return;
     const file = view.file;
     if (!file)
